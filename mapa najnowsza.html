@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Biegajmy Sobie — Wirtualnie do Los Angeles (snapshot)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f7f9fb; color:#222; }
+    header { background: linear-gradient(90deg,#ff9aa2,#9bd3ff,#b8f1b0); padding:14px; display:flex; align-items:center; gap:12px; }
+    .logo { width:56px; height:56px; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; color:#333; box-shadow:0 4px 10px rgba(0,0,0,0.08); }
+    h1 { margin:0; font-size:18px; }
+    p.lead { margin:0; opacity:0.85; font-size:12px; }
+    .container { display:flex; gap:14px; padding:12px; }
+    .controls { width:360px; max-width:40%; background:#fff; padding:12px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
+    label { font-size:13px; display:block; margin-bottom:8px; }
+    input[type=number] { display: none; }
+    .manual-controls button { display: none; }
+    button { margin-top:8px; padding:10px 12px; background:#ff7675; color:#fff; border:none; border-radius:8px; cursor:pointer; font-weight:600; }
+    button.secondary { background:#4aa3ff; }
+    #progressBar { height:16px; background:#eee; border-radius:10px; overflow:hidden; margin-top:12px; }
+    #progressInner { height:100%; width:0%; background:linear-gradient(90deg,#ffd27a,#ff7675); }
+    .stats { margin-top:12px; font-size:14px; }
+    #map { flex:1; height:540px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,0.06); overflow:hidden; }
+    footer { padding:12px; text-align:center; font-size:13px; color:#666; }
+    .small { font-size:12px; color:#666; }
+    #canvasSnapshot { display:none; }
+    .status-bar { margin-top: 10px; padding: 8px 0; font-size: 14px; font-weight: 600; color: #444; border-top: 1px solid #eee; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">BS</div>
+    <div>
+      <h1>Biegajmy Sobie — Ekipa Sochaczewska</h1>
+      <p class="lead">Wirtualna wyprawa na Igrzyska 2028 — Do Los Angeles</p>
+    </div>
+  </header>
+  <div class="container">
+    <div class="controls">
+      <label style="display: none;">Wpisz sumę przebiegniętych kilometrów przez ekipę (km):</label>
+      <input id="kmInput" type="number" min="0" step="0.01" value="0" />
+      <div class="manual-controls">
+        <button id="updateBtn">Aktualizuj pozycję</button>
+        <button id="resetBtn" class="secondary">Resetuj do 0</button>
+      </div>
+      
+      <div class="status-bar" id="statusText">Trwa ładowanie statusu...</div>
+      <div id="progressBar"><div id="progressInner"></div></div>
+      <div class="stats">
+        <div>Cel (Sochaczew → Los Angeles): <strong id="targetKm">9650</strong> km</div>
+        <div>Przebiegnięto: <strong id="doneKm">0</strong> km</div>
+        <div>Pozostało: <strong id="leftKm">9650</strong> km</div>
+        <div>Procent celu: <strong id="pct">0%</strong></div>
+      </div>
+      <hr/>
+      <button id="snapshotBtn" style="background:#6f6ff2">📸 Zrób zrzut i zapisz obrazek</button>
+      <div style="height:8px"></div>
+      <a id="downloadLink" style="display:none"></a>
+      <div class="small" style="margin-top:8px;">Wygenerowany obraz możesz zapisać i udostępnić na Facebooku.</div>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <canvas id="canvasSnapshot" width="1200" height="628"></canvas>
+
+  <footer>Aktualizacja danych następuje automatycznie co 3 minuty.</footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script>
+    const start = [52.2290, 20.2385];
+    const end = [34.0522, -118.2437];
+    const TARGET_KM = 9650;
+    document.getElementById('targetKm').innerText = TARGET_KM;
+
+    const map = L.map('map').setView([46, -40], 3);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:18, attribution:'© OpenStreetMap'}).addTo(map);
+
+    const line = turf.lineString([[start[1], start[0]], [end[1], end[0]]]);
+    const distanceKm = turf.length(line, {units: 'kilometers'});
+    const numSamples = 200;
+    const coords = [];
+    for (let i=0;i<=numSamples;i++){
+      const along = turf.along(line, distanceKm * (i/numSamples), {units:'kilometers'});
+      const c = along.geometry.coordinates;
+      coords.push([c[1], c[0]]);
+    }
+    const route = L.polyline(coords, {color:'#ff7675', weight:4, opacity:0.9}).addTo(map);
+    map.fitBounds(route.getBounds(), {padding:[40,40]});
+    const marker = L.marker(start).addTo(map);
+
+    // NOWA WERSJA FUNKCJI updateUI
+    function updateUI(km){ 
+        const done = Math.max(0, Math.min(km, TARGET_KM));
+        const pct = (done / TARGET_KM) * 100;
+        document.getElementById('doneKm').innerText = done.toFixed(2);
+        document.getElementById('leftKm').innerText = Math.max(0, (TARGET_KM-done)).toFixed(2);
+        document.getElementById('pct').innerText = pct.toFixed(2) + '%';
+        document.getElementById('progressInner').style.width = Math.min(100, pct) + '%';
+        
+        const targetDist = distanceKm * (done / TARGET_KM);
+        const pos = turf.along(line, Math.min(distanceKm, targetDist), {units:'kilometers'});
+        const p = pos.geometry.coordinates;
+        
+        marker.setLatLng([p[1], p[0]]); 
+        marker.bindPopup("Pozycja: " + document.getElementById('doneKm').innerText + " km (" + document.getElementById('pct').innerText + ")");
+
+        if (done > 0) {
+            map.panTo(marker.getLatLng(), {animate:true, duration:1.0});
+            if (map.getZoom() < 5) map.setZoom(5);
+        } else {
+            map.setView([46, -40], 3);
+        }
+    }
+
+    updateUI(0);
+
+    // --- Pobieranie danych z Web App ---
+    const STATUS_URL = "https://script.google.com/macros/s/AKfycby6lUT0j16RIpaAY0WksuuQqzGXAh--M1_prsLBVoFiBAW0NHWDKKWE4q1cYMlx-dVOpA/exec";
+
+    async function refreshFromWebApp(){
+      const statusEl = document.getElementById('statusText');
+      statusEl.textContent = "Trwa ładowanie statusu...";
+      statusEl.style.color = '#444';
+
+      try{
+        const r = await fetch(STATUS_URL, {cache: "no-store"});
+        if (!r.ok) throw new Error("Błąd sieci: Status HTTP " + r.status);
+        
+        const text = await r.text();
+        const obj = JSON.parse(text);
+
+        const km = parseFloat(obj.sum) || 0;
+
+        // ✅ Nowe wywołanie z uproszczoną funkcją
+        updateUI(km);
+        
+        const pct = (km / TARGET_KM) * 100;
+        if (obj.statusMessage) {
+            statusEl.textContent = obj.statusMessage;
+        } else {
+            statusEl.textContent = `Aktualizacja: Przebiegliśmy już ${km.toFixed(2)} km (${pct.toFixed(2)}% celu)`;
+        }
+        statusEl.style.color = km > 0 ? '#2E7D32' : '#1E88E5';
+
+      } catch(e){
+        console.error("refreshFromWebApp error:", e);
+        const statusEl = document.getElementById('statusText');
+        statusEl.textContent = "Błąd połączenia/parsowania danych. Sprawdź Web App: " + e.message;
+        statusEl.style.color = '#D32F2F';
+      }
+    }
+
+    refreshFromWebApp();
+    setInterval(refreshFromWebApp, 3 * 60 * 1000);
+  </script>
+</body>
+</html>
